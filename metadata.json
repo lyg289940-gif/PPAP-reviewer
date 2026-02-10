@@ -1,0 +1,7 @@
+{
+  "name": "PPAP reviewer",
+  "description": "An AI-powered assistant for Automotive Supplier Quality Engineers to audit PPAP deliverables against standard checklists.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

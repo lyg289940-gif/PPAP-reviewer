@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { ProjectInfo, Language } from '../types';
 import { ShieldCheck, ChevronRight, LayoutTemplate, Box, Truck, FileBadge, Plus, History, Trash2, Calendar, FolderOpen } from 'lucide-react';
+import { del } from 'idb-keyval';
 
 interface Props {
   onStart: (info: ProjectInfo) => void;
@@ -44,18 +45,31 @@ export const LandingPage: React.FC<Props> = ({ onStart, language, setLanguage })
     }
   };
 
-  const handleDelete = (e: React.MouseEvent, id: string) => {
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (confirm(language === 'zh' ? '确定要删除这个项目吗？所有数据将永久丢失。' : 'Are you sure? All project data will be lost.')) {
       const updated = recentProjects.filter(p => p.id !== id);
       setRecentProjects(updated);
-      localStorage.setItem('ppap_projects_list', JSON.stringify(updated));
+      try {
+        localStorage.setItem('ppap_projects_list', JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to update project list in localStorage:", e);
+      }
       
       // Cleanup detailed data
       localStorage.removeItem(`ppap_items_${id}`);
       localStorage.removeItem(`ppap_findings_${id}`);
       localStorage.removeItem(`ppap_consistency_${id}`);
       localStorage.removeItem(`ppap_level_${id}`);
+      
+      try {
+        await del(`ppap_items_${id}`);
+        await del(`ppap_findings_${id}`);
+        await del(`ppap_consistency_${id}`);
+        await del(`ppap_level_${id}`);
+      } catch (err) {
+        console.error("Failed to delete from IndexedDB:", err);
+      }
       
       if (updated.length === 0) setActiveTab('new');
     }

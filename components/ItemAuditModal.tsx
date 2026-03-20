@@ -66,6 +66,12 @@ export const ItemAuditModal: React.FC<Props> = ({ item, isOpen, onClose, onUpdat
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Check file size (10MB limit)
+    if (file.size > 10 * 1024 * 1024) {
+      alert(language === 'zh' ? '文件大小不能超过 10MB' : 'File size cannot exceed 10MB');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = async () => {
       const base64Data = reader.result as string;

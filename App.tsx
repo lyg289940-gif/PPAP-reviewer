@@ -26,6 +26,7 @@ import { ReportView } from './components/ReportView';
 import { LandingPage } from './components/LandingPage';
 import { PieChart as RePieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
 import { auditPpapItem } from './geminiService';
+import { get, set } from 'idb-keyval';
 
 // Define chart colors
 const COLORS = ['#10B981', '#F59E0B', '#EF4444', '#E5E7EB'];
@@ -119,59 +120,81 @@ function App() {
 
   // Save Language globally
   useEffect(() => {
-    localStorage.setItem('ppap_global_lang', language);
+    try {
+      localStorage.setItem('ppap_global_lang', language);
+    } catch (e) {
+      console.error("Failed to save language to localStorage:", e);
+    }
   }, [language]);
 
   // Load Project Specific Data when projectInfo is set
   useEffect(() => {
     if (projectInfo) {
       const pid = projectInfo.id;
-      const savedLevel = localStorage.getItem(`ppap_level_${pid}`);
-      const savedItems = localStorage.getItem(`ppap_items_${pid}`);
-      const savedFindings = localStorage.getItem(`ppap_findings_${pid}`);
-      const savedConsistency = localStorage.getItem(`ppap_consistency_${pid}`);
-
-      if (savedLevel) setCurrentLevel(Number(savedLevel));
       
-      if (savedItems) {
-        setItems(JSON.parse(savedItems));
-      } else {
-        // Initialize new project items
-        setItems(INITIAL_ITEMS(3));
-      }
+      const loadData = async () => {
+        // Migration helper: check idb-keyval first, fallback to localStorage
+        const getWithMigration = async (key: string) => {
+          let val = await get(key);
+          if (!val) {
+            val = localStorage.getItem(key);
+            if (val) {
+              await set(key, val);
+              localStorage.removeItem(key);
+            }
+          }
+          return val;
+        };
 
-      if (savedFindings) {
-        try {
-          const parsed = JSON.parse(savedFindings);
-          // Hydrate timestamps (string -> Date)
-          setMasterFindings(parsed.map((f: any) => ({
-            ...f,
-            timestamp: new Date(f.timestamp)
-          })));
-        } catch (e) {
-          console.error("Failed to parse findings:", e);
+        const savedLevel = await getWithMigration(`ppap_level_${pid}`);
+        const savedItems = await getWithMigration(`ppap_items_${pid}`);
+        const savedFindings = await getWithMigration(`ppap_findings_${pid}`);
+        const savedConsistency = await getWithMigration(`ppap_consistency_${pid}`);
+
+        if (savedLevel) setCurrentLevel(Number(savedLevel));
+        
+        if (savedItems) {
+          setItems(JSON.parse(savedItems));
+        } else {
+          // Initialize new project items
+          setItems(INITIAL_ITEMS(3));
+        }
+
+        if (savedFindings) {
+          try {
+            const parsed = JSON.parse(savedFindings);
+            // Hydrate timestamps (string -> Date)
+            setMasterFindings(parsed.map((f: any) => ({
+              ...f,
+              timestamp: new Date(f.timestamp)
+            })));
+          } catch (e) {
+            console.error("Failed to parse findings:", e);
+            setMasterFindings([]);
+          }
+        } else {
           setMasterFindings([]);
         }
-      } else {
-        setMasterFindings([]);
-      }
 
-      if (savedConsistency) {
-        try {
-          const parsed = JSON.parse(savedConsistency);
-          // Hydrate lastRun dates
-          const hydrated = Object.entries(parsed).reduce((acc, [key, val]: [string, any]) => {
-            acc[key] = { ...val, lastRun: new Date(val.lastRun) };
-            return acc;
-          }, {} as Record<string, ConsistencyResult>);
-          setConsistencyResults(hydrated);
-        } catch (e) {
-           console.error("Failed to parse consistency results:", e);
-           setConsistencyResults({});
+        if (savedConsistency) {
+          try {
+            const parsed = JSON.parse(savedConsistency);
+            // Hydrate lastRun dates
+            const hydrated = Object.entries(parsed).reduce((acc, [key, val]: [string, any]) => {
+              acc[key] = { ...val, lastRun: new Date(val.lastRun) };
+              return acc;
+            }, {} as Record<string, ConsistencyResult>);
+            setConsistencyResults(hydrated);
+          } catch (e) {
+             console.error("Failed to parse consistency results:", e);
+             setConsistencyResults({});
+          }
+        } else {
+          setConsistencyResults({});
         }
-      } else {
-        setConsistencyResults({});
-      }
+      };
+      
+      loadData();
     }
   }, [projectInfo]);
 
@@ -180,22 +203,30 @@ function App() {
     if (!projectInfo) return;
     const pid = projectInfo.id;
     
-    localStorage.setItem(`ppap_items_${pid}`, JSON.stringify(items));
-    localStorage.setItem(`ppap_findings_${pid}`, JSON.stringify(masterFindings));
-    localStorage.setItem(`ppap_consistency_${pid}`, JSON.stringify(consistencyResults));
-    localStorage.setItem(`ppap_level_${pid}`, String(currentLevel));
+    const saveData = async () => {
+      try {
+        await set(`ppap_items_${pid}`, JSON.stringify(items));
+        await set(`ppap_findings_${pid}`, JSON.stringify(masterFindings));
+        await set(`ppap_consistency_${pid}`, JSON.stringify(consistencyResults));
+        await set(`ppap_level_${pid}`, String(currentLevel));
+        
+        // Also update the lastAccessedAt in the main project list
+        const allProjectsStr = localStorage.getItem('ppap_projects_list');
+        if (allProjectsStr) {
+          const allProjects: ProjectInfo[] = JSON.parse(allProjectsStr);
+          const updatedList = allProjects.map(p => 
+            p.id === pid ? { ...p, lastAccessedAt: new Date().toISOString() } : p
+          );
+          localStorage.setItem('ppap_projects_list', JSON.stringify(updatedList));
+        }
+      } catch (e) {
+        console.error("Failed to save to IndexedDB:", e);
+        alert(language === 'zh' ? '保存到本地数据库失败。' : 'Failed to save to local database.');
+      }
+    };
     
-    // Also update the lastAccessedAt in the main project list
-    const allProjectsStr = localStorage.getItem('ppap_projects_list');
-    if (allProjectsStr) {
-      const allProjects: ProjectInfo[] = JSON.parse(allProjectsStr);
-      const updatedList = allProjects.map(p => 
-        p.id === pid ? { ...p, lastAccessedAt: new Date().toISOString() } : p
-      );
-      localStorage.setItem('ppap_projects_list', JSON.stringify(updatedList));
-    }
-
-  }, [items, masterFindings, consistencyResults, currentLevel, projectInfo]);
+    saveData();
+  }, [items, masterFindings, consistencyResults, currentLevel, projectInfo, language]);
 
   const handleStartProject = (info: ProjectInfo) => {
     // Save to global project list if it doesn't exist
@@ -213,7 +244,14 @@ function App() {
       allProjects.unshift({ ...existing, lastAccessedAt: new Date().toISOString() });
     }
     
-    localStorage.setItem('ppap_projects_list', JSON.stringify(allProjects));
+    try {
+      localStorage.setItem('ppap_projects_list', JSON.stringify(allProjects));
+    } catch (e) {
+      console.error("Failed to save project list to localStorage:", e);
+      if (e instanceof DOMException && (e.code === 22 || e.name === 'QuotaExceededError')) {
+        alert(language === 'zh' ? '存储空间已满，无法保存新项目。请清理其他项目。' : 'Storage quota exceeded. Cannot save new project. Please clear other projects.');
+      }
+    }
     setProjectInfo(info);
     
     // Default to Level 3 for new projects, or load in useEffect

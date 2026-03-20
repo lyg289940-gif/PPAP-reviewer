@@ -282,7 +282,11 @@ export const ReportView: React.FC<Props> = ({ findings, language, onRemoveFindin
                     data[el.id] = el.value;
                 }
                 
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                } catch (e) {
+                    console.error("Failed to save report data to localStorage:", e);
+                }
                 
                 // Visual feedback
                 saveStatusEl.style.opacity = '1';

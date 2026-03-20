@@ -97,11 +97,54 @@ export const sendChatPrompt = async (
   }
 };
 
+export const summarizeExemptions = async (
+  documentName: string,
+  exemptedIssues: string[],
+  language: Language
+): Promise<string> => {
+  const ai = getAiClient();
+  
+  const langInstruction = language === 'zh' 
+    ? "请用简体中文总结。"
+    : "Please summarize in English.";
+
+  const prompt = `
+    You are an expert Automotive Supplier Quality Engineer (SQE).
+    The user is reviewing an AI audit report for the document: "${documentName}".
+    The AI originally flagged the following issues as non-compliant based on AIAG/IATF standards, but the user has decided to EXEMPT them based on their own specific company requirements.
+    
+    Issues to exempt:
+    ${exemptedIssues.map(i => `- ${i}`).join('\n')}
+    
+    Your task is to summarize these specific issues into a concise, generalized "Exemption Rule" (1-2 sentences). 
+    This rule will be saved and used in future AI audits to instruct the AI to ignore similar issues for this document type.
+    
+    ${langInstruction}
+    Provide ONLY the summarized rule text, nothing else.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: prompt,
+      config: {
+        responseMimeType: "text/plain",
+      }
+    });
+    return response.text?.trim() || "";
+  } catch (error) {
+    console.error("Summarize Exemptions Error:", error);
+    throw error;
+  }
+};
+
 export const auditPpapItem = async (
   itemName: string,
   base64Image: string,
   mimeType: string,
-  language: Language
+  language: Language,
+  exemptions: string[] = [],
+  focusRules: string[] = []
 ): Promise<AuditFeedback> => {
   const ai = getAiClient();
   
@@ -114,6 +157,20 @@ export const auditPpapItem = async (
 
   // Get current date for context to avoid "future date" hallucinations
   const today = new Date().toISOString().split('T')[0];
+
+  let exemptionPrompt = "";
+  if (exemptions && exemptions.length > 0) {
+    exemptionPrompt = language === 'zh'
+      ? `\n**永久豁免清单 (Permanent Exemptions)**:\n用户已将以下问题列入豁免清单。在审核时，**绝对不要**将符合以下描述的问题标记为不符合项或发现项：\n${exemptions.map(e => `- ${e}`).join('\n')}\n`
+      : `\n**Permanent Exemptions**:\nThe user has exempted the following issues. **DO NOT** flag any issues that match the following descriptions as findings or non-compliances:\n${exemptions.map(e => `- ${e}`).join('\n')}\n`;
+  }
+
+  let focusRulesPrompt = "";
+  if (focusRules && focusRules.length > 0) {
+    focusRulesPrompt = language === 'zh'
+      ? `\n**重点关注问题清单 (Focus Issues)**:\n用户已将以下问题列入重点关注清单。在审核时，**必须仔细检查**是否符合以下描述的问题，如果存在，必须将其标记为不符合项或发现项：\n${focusRules.map(e => `- ${e}`).join('\n')}\n`
+      : `\n**Focus Issues**:\nThe user has added the following issues to the focus list. **YOU MUST CAREFULLY CHECK** for any issues that match the following descriptions. If they exist, they MUST be flagged as findings or non-compliances:\n${focusRules.map(e => `- ${e}`).join('\n')}\n`;
+  }
 
   // Specific check items logic
   const lowerName = itemName.toLowerCase();
@@ -316,6 +373,8 @@ export const auditPpapItem = async (
     - If there are 10 errors, list all 10 errors individually.
     
     ${langInstruction}
+    ${exemptionPrompt}
+    ${focusRulesPrompt}
     ${specificTaskPrompt}
 
     Please perform a rigorous visual and content inspection based on automotive standards (AIAG/VDA).

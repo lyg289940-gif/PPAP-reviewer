@@ -78,3 +78,17 @@ export interface ConsistencyResult {
   discrepancies: string[];
   lastRun: Date;
 }
+
+export interface ExemptionRule {
+  id: string;
+  documentName: string;
+  summary: string;
+  createdAt: string;
+}
+
+export interface FocusRule {
+  id: string;
+  documentName: string;
+  summary: string;
+  createdAt: string;
+}

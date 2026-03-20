@@ -15,14 +15,18 @@ import {
   ClipboardList,
   PlayCircle,
   Loader2,
-  LogOut
+  LogOut,
+  ShieldOff,
+  Target
 } from 'lucide-react';
-import { PpapLevel, PpapItem, AuditStatus, Language, Finding, ConsistencyResult, ProjectInfo } from './types';
+import { PpapLevel, PpapItem, AuditStatus, Language, Finding, ConsistencyResult, ProjectInfo, ExemptionRule, FocusRule } from './types';
 import { INITIAL_ITEMS } from './constants';
 import { StatsCard } from './components/StatsCard';
 import { ItemAuditModal } from './components/ItemAuditModal';
 import { ConsistencyView } from './components/ConsistencyView';
 import { ReportView } from './components/ReportView';
+import { ExemptionsView } from './components/ExemptionsView';
+import { FocusRulesView } from './components/FocusRulesView';
 import { LandingPage } from './components/LandingPage';
 import { PieChart as RePieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
 import { auditPpapItem } from './geminiService';
@@ -62,7 +66,9 @@ const TRANSLATIONS = {
     uploaded: "Uploaded",
     batchAudit: "Batch Audit Pending",
     auditing: "Auditing...",
-    switchProject: "Switch Project"
+    switchProject: "Switch Project",
+    exemptions: "Exemptions",
+    exemptionsList: "Exemption Rules"
   },
   zh: {
     title: "AutoPPAP 智能助手",
@@ -93,7 +99,11 @@ const TRANSLATIONS = {
     uploaded: "已上传",
     batchAudit: "一键审核待办",
     auditing: "正在批量审核...",
-    switchProject: "切换项目"
+    switchProject: "切换项目",
+    exemptions: "豁免规则",
+    exemptionsList: "永久豁免清单",
+    focus: "关注问题",
+    focusList: "关注问题清单"
   }
 };
 
@@ -102,19 +112,38 @@ function App() {
   const [currentLevel, setCurrentLevel] = useState<PpapLevel>(PpapLevel.LEVEL_3);
   const [items, setItems] = useState<PpapItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<PpapItem | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'correlation' | 'report'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'correlation' | 'report' | 'exemptions' | 'focus'>('dashboard');
   const [language, setLanguage] = useState<Language>('zh'); 
   const [masterFindings, setMasterFindings] = useState<Finding[]>([]);
   const [consistencyResults, setConsistencyResults] = useState<Record<string, ConsistencyResult>>({});
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [exemptions, setExemptions] = useState<ExemptionRule[]>([]);
+  const [focusRules, setFocusRules] = useState<FocusRule[]>([]);
+  const [showWarning, setShowWarning] = useState(true);
 
   const t = TRANSLATIONS[language];
 
-  // Load Global Settings (Language) on Mount
+  // Load Global Settings (Language, Exemptions) and Last Project on Mount
   useEffect(() => {
     const savedLang = localStorage.getItem('ppap_global_lang');
     if (savedLang) setLanguage(savedLang as Language);
+
+    const hasAccepted = sessionStorage.getItem('ppap_warning_accepted');
+    if (hasAccepted) {
+      setShowWarning(false);
+    }
+
+    const lastPid = localStorage.getItem('ppap_last_project_id');
+    const allProjectsStr = localStorage.getItem('ppap_projects_list');
+    if (lastPid && allProjectsStr) {
+      const allProjects: ProjectInfo[] = JSON.parse(allProjectsStr);
+      const lastProject = allProjects.find(p => p.id === lastPid);
+      if (lastProject) setProjectInfo(lastProject);
+    }
+    
     setIsInitialized(true);
   }, []);
 
@@ -131,6 +160,8 @@ function App() {
   useEffect(() => {
     if (projectInfo) {
       const pid = projectInfo.id;
+      setIsDataLoaded(false); // Reset when switching projects
+      setIsLoading(true);
       
       const loadData = async () => {
         // Migration helper: check idb-keyval first, fallback to localStorage
@@ -139,6 +170,8 @@ function App() {
           if (!val) {
             val = localStorage.getItem(key);
             if (val) {
+              // If it's a string, it might be JSON.stringify-ed
+              // We store as string in IndexedDB too for consistency with the current logic
               await set(key, val);
               localStorage.removeItem(key);
             }
@@ -146,68 +179,118 @@ function App() {
           return val;
         };
 
-        const savedLevel = await getWithMigration(`ppap_level_${pid}`);
-        const savedItems = await getWithMigration(`ppap_items_${pid}`);
-        const savedFindings = await getWithMigration(`ppap_findings_${pid}`);
-        const savedConsistency = await getWithMigration(`ppap_consistency_${pid}`);
+        try {
+          const savedLevel = await getWithMigration(`ppap_level_${pid}`);
+          const level = savedLevel ? Number(savedLevel) : 3;
+          setCurrentLevel(level);
 
-        if (savedLevel) setCurrentLevel(Number(savedLevel));
-        
-        if (savedItems) {
-          setItems(JSON.parse(savedItems));
-        } else {
-          // Initialize new project items
-          setItems(INITIAL_ITEMS(3));
-        }
+          const savedItems = await getWithMigration(`ppap_items_${pid}`);
+          const savedFindings = await getWithMigration(`ppap_findings_${pid}`);
+          const savedConsistency = await getWithMigration(`ppap_consistency_${pid}`);
+          const savedExemptions = await getWithMigration(`ppap_exemptions_${pid}`);
+          const savedFocusRules = await getWithMigration(`ppap_focus_${pid}`);
 
-        if (savedFindings) {
-          try {
-            const parsed = JSON.parse(savedFindings);
-            // Hydrate timestamps (string -> Date)
-            setMasterFindings(parsed.map((f: any) => ({
-              ...f,
-              timestamp: new Date(f.timestamp)
-            })));
-          } catch (e) {
-            console.error("Failed to parse findings:", e);
+          if (savedItems) {
+            try {
+              setItems(JSON.parse(savedItems));
+            } catch (e) {
+              console.error("Failed to parse items:", e);
+              setItems(INITIAL_ITEMS(level));
+            }
+          } else {
+            // Initialize new project items based on level
+            setItems(INITIAL_ITEMS(level));
+          }
+
+          if (savedFindings) {
+            try {
+              const parsed = JSON.parse(savedFindings);
+              // Hydrate timestamps (string -> Date)
+              setMasterFindings(parsed.map((f: any) => ({
+                ...f,
+                timestamp: new Date(f.timestamp)
+              })));
+            } catch (e) {
+              console.error("Failed to parse findings:", e);
+              setMasterFindings([]);
+            }
+          } else {
             setMasterFindings([]);
           }
-        } else {
-          setMasterFindings([]);
-        }
 
-        if (savedConsistency) {
-          try {
-            const parsed = JSON.parse(savedConsistency);
-            // Hydrate lastRun dates
-            const hydrated = Object.entries(parsed).reduce((acc, [key, val]: [string, any]) => {
-              acc[key] = { ...val, lastRun: new Date(val.lastRun) };
-              return acc;
-            }, {} as Record<string, ConsistencyResult>);
-            setConsistencyResults(hydrated);
-          } catch (e) {
-             console.error("Failed to parse consistency results:", e);
-             setConsistencyResults({});
+          if (savedConsistency) {
+            try {
+              const parsed = JSON.parse(savedConsistency);
+              // Hydrate lastRun dates
+              const hydrated = Object.entries(parsed).reduce((acc, [key, val]: [string, any]) => {
+                acc[key] = { ...val, lastRun: new Date(val.lastRun) };
+                return acc;
+              }, {} as Record<string, ConsistencyResult>);
+              setConsistencyResults(hydrated);
+            } catch (e) {
+               console.error("Failed to parse consistency results:", e);
+               setConsistencyResults({});
+            }
+          } else {
+            setConsistencyResults({});
           }
-        } else {
-          setConsistencyResults({});
+
+          if (savedExemptions) {
+            try {
+              setExemptions(JSON.parse(savedExemptions));
+            } catch (e) {
+              console.error("Failed to parse exemptions:", e);
+              setExemptions([]);
+            }
+          } else {
+            setExemptions([]);
+          }
+
+          if (savedFocusRules) {
+            try {
+              setFocusRules(JSON.parse(savedFocusRules));
+            } catch (e) {
+              console.error("Failed to parse focus rules:", e);
+              setFocusRules([]);
+            }
+          } else {
+            setFocusRules([]);
+          }
+          
+          setIsDataLoaded(true);
+        } catch (error) {
+          console.error("Error loading project data:", error);
+        } finally {
+          setIsLoading(false);
         }
       };
       
       loadData();
+      localStorage.setItem('ppap_last_project_id', pid);
+    } else {
+      setIsLoading(false);
+      setIsDataLoaded(false);
     }
-  }, [projectInfo]);
+  }, [projectInfo?.id]);
 
   // Save Project Specific Data on Change
   useEffect(() => {
-    if (!projectInfo) return;
+    if (!projectInfo || !isDataLoaded) return;
     const pid = projectInfo.id;
     
     const saveData = async () => {
       try {
-        await set(`ppap_items_${pid}`, JSON.stringify(items));
+        // Strip fileData to save space and prevent quota issues, as requested by user
+        const itemsToSave = items.map(item => {
+          const { fileData, ...rest } = item;
+          return rest;
+        });
+
+        await set(`ppap_items_${pid}`, JSON.stringify(itemsToSave));
         await set(`ppap_findings_${pid}`, JSON.stringify(masterFindings));
         await set(`ppap_consistency_${pid}`, JSON.stringify(consistencyResults));
+        await set(`ppap_exemptions_${pid}`, JSON.stringify(exemptions));
+        await set(`ppap_focus_${pid}`, JSON.stringify(focusRules));
         await set(`ppap_level_${pid}`, String(currentLevel));
         
         // Also update the lastAccessedAt in the main project list
@@ -226,7 +309,7 @@ function App() {
     };
     
     saveData();
-  }, [items, masterFindings, consistencyResults, currentLevel, projectInfo, language]);
+  }, [items, masterFindings, consistencyResults, exemptions, focusRules, currentLevel, projectInfo, language, isDataLoaded]);
 
   const handleStartProject = (info: ProjectInfo) => {
     // Save to global project list if it doesn't exist
@@ -237,27 +320,35 @@ function App() {
     if (existingIndex === -1) {
       // New project
       allProjects.unshift(info); // Add to top
+      
+      // Reset data for the new project
+      setItems(INITIAL_ITEMS(PpapLevel.LEVEL_3));
+      setMasterFindings([]);
+      setConsistencyResults({});
+      setCurrentLevel(PpapLevel.LEVEL_3);
+      setIsDataLoaded(true); // New project, ready to save
     } else {
       // Update access time and move to top
       const existing = allProjects[existingIndex];
       allProjects.splice(existingIndex, 1);
       allProjects.unshift({ ...existing, lastAccessedAt: new Date().toISOString() });
+      
+      // For existing projects, we don't reset state here.
+      // The loadData useEffect will trigger because we call setProjectInfo
+      setIsDataLoaded(false); 
     }
     
     try {
       localStorage.setItem('ppap_projects_list', JSON.stringify(allProjects));
+      localStorage.setItem('ppap_last_project_id', info.id);
     } catch (e) {
       console.error("Failed to save project list to localStorage:", e);
       if (e instanceof DOMException && (e.code === 22 || e.name === 'QuotaExceededError')) {
         alert(language === 'zh' ? '存储空间已满，无法保存新项目。请清理其他项目。' : 'Storage quota exceeded. Cannot save new project. Please clear other projects.');
       }
     }
-    setProjectInfo(info);
     
-    // Default to Level 3 for new projects, or load in useEffect
-    if (existingIndex === -1) {
-       setCurrentLevel(PpapLevel.LEVEL_3);
-    }
+    setProjectInfo(info);
   };
 
   const handleSwitchProject = () => {
@@ -266,6 +357,8 @@ function App() {
     setItems([]);
     setMasterFindings([]);
     setConsistencyResults({});
+    setIsDataLoaded(false);
+    localStorage.removeItem('ppap_last_project_id');
   };
 
   const handleLevelChange = (level: PpapLevel) => {
@@ -303,11 +396,15 @@ function App() {
     
     for (const item of toAudit) {
       try {
+        const docName = language === 'zh' && item.name_zh ? item.name_zh : item.name;
+        const docExemptions = exemptions.filter(e => e.documentName === docName).map(e => e.summary);
+        
         const result = await auditPpapItem(
-          language === 'zh' && item.name_zh ? item.name_zh : item.name,
+          docName,
           item.fileData!,
           item.mimeType || 'application/pdf',
-          language
+          language,
+          docExemptions
         );
 
         const updatedItem = {
@@ -351,14 +448,63 @@ function App() {
     }
   };
 
+  const handleAcceptWarning = () => {
+    sessionStorage.setItem('ppap_warning_accepted', 'true');
+    setShowWarning(false);
+  };
+
+  const WarningModal = showWarning ? (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-in zoom-in-95 duration-200">
+        <div className="flex items-center gap-3 text-amber-600 mb-4">
+          <AlertTriangle className="w-8 h-8" />
+          <h2 className="text-xl font-bold">
+            {language === 'zh' ? '测试阶段警告' : 'Beta Testing Warning'}
+          </h2>
+        </div>
+        <p className="text-gray-600 mb-6 leading-relaxed">
+          {language === 'zh' 
+            ? '此应用程序目前处于测试阶段。请不要输入或上传任何机密信息、敏感数据或真实的保密文件。This application is currently in the testing phase. Please do not input or upload any confidential information, sensitive data, or real classified files.' 
+            : 'This application is currently in the testing phase. Please do not input or upload any confidential information, sensitive data, or real classified files.'}
+        </p>
+        <button 
+          onClick={handleAcceptWarning}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-xl transition-colors"
+        >
+          {language === 'zh' ? '我已了解' : 'I Understand'}
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   if (!isInitialized) return null;
 
   if (!projectInfo) {
-    return <LandingPage onStart={handleStartProject} language={language} setLanguage={setLanguage} />;
+    return (
+      <>
+        {WarningModal}
+        <LandingPage onStart={handleStartProject} language={language} setLanguage={setLanguage} />
+      </>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <>
+        {WarningModal}
+        <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-slate-400">Loading project data...</p>
+          </div>
+        </div>
+      </>
+    );
   }
 
   return (
     <div className="min-h-screen flex bg-gray-50 text-gray-900 font-sans">
+      {WarningModal}
       
       {/* Sidebar */}
       <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col flex-shrink-0 transition-all duration-300">
@@ -403,6 +549,22 @@ function App() {
             <ClipboardList className="w-5 h-5" />
             <span>{t.report}</span>
             {masterFindings.length > 0 && <span className="ml-auto bg-red-500 text-xs py-0.5 px-2 rounded-full text-white">{masterFindings.length}</span>}
+          </button>
+          <button 
+             onClick={() => setActiveTab('exemptions')}
+             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'exemptions' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800'}`}
+          >
+            <ShieldOff className="w-5 h-5" />
+            <span>{t.exemptions}</span>
+            {exemptions.length > 0 && <span className="ml-auto bg-amber-500 text-xs py-0.5 px-2 rounded-full text-white">{exemptions.length}</span>}
+          </button>
+          <button 
+             onClick={() => setActiveTab('focus')}
+             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'focus' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800'}`}
+          >
+            <Target className="w-5 h-5" />
+            <span>{t.focus}</span>
+            {focusRules.length > 0 && <span className="ml-auto bg-indigo-500 text-xs py-0.5 px-2 rounded-full text-white">{focusRules.length}</span>}
           </button>
 
           <div className="pt-8">
@@ -640,6 +802,26 @@ function App() {
               onRemoveFinding={handleRemoveFinding}
             />
           )}
+
+          {activeTab === 'exemptions' && (
+            <ExemptionsView
+              exemptions={exemptions}
+              language={language}
+              onRemoveExemption={(id) => setExemptions(prev => prev.filter(e => e.id !== id))}
+              onAddExemption={(rule) => setExemptions(prev => [...prev, rule])}
+              onEditExemption={(rule) => setExemptions(prev => prev.map(e => e.id === rule.id ? rule : e))}
+            />
+          )}
+
+          {activeTab === 'focus' && (
+            <FocusRulesView
+              focusRules={focusRules}
+              language={language}
+              onRemoveFocusRule={(id) => setFocusRules(prev => prev.filter(e => e.id !== id))}
+              onAddFocusRule={(rule) => setFocusRules(prev => [...prev, rule])}
+              onEditFocusRule={(rule) => setFocusRules(prev => prev.map(e => e.id === rule.id ? rule : e))}
+            />
+          )}
         </div>
       </main>
 
@@ -652,6 +834,9 @@ function App() {
           onUpdate={handleItemUpdate}
           onAddFindings={handleAddFindings}
           language={language}
+          exemptions={exemptions.filter(e => e.documentName === (language === 'zh' && selectedItem.name_zh ? selectedItem.name_zh : selectedItem.name))}
+          focusRules={focusRules.filter(e => e.documentName === (language === 'zh' && selectedItem.name_zh ? selectedItem.name_zh : selectedItem.name))}
+          onAddExemption={(rule) => setExemptions(prev => [...prev, rule])}
         />
       )}
     </div>

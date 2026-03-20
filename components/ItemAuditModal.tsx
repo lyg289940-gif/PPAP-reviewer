@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { PpapItem, AuditStatus, AuditFeedback, Language, Finding } from '../types';
-import { X, Upload, CheckCircle, AlertTriangle, XCircle, FileText, Activity, Search, PlusCircle, CheckSquare, Square, Save, Edit3, Eye } from 'lucide-react';
-import { auditPpapItem } from '../geminiService';
+import { PpapItem, AuditStatus, AuditFeedback, Language, Finding, ExemptionRule, FocusRule } from '../types';
+import { X, Upload, CheckCircle, AlertTriangle, XCircle, FileText, Activity, Search, PlusCircle, CheckSquare, Square, Save, Edit3, Eye, ShieldOff, Loader2 } from 'lucide-react';
+import { auditPpapItem, summarizeExemptions } from '../geminiService';
 import { ChatInterface } from './ChatInterface';
 
 interface Props {
@@ -12,6 +12,9 @@ interface Props {
   onUpdate: (updatedItem: PpapItem) => void;
   onAddFindings: (findings: Finding[]) => void;
   language: Language;
+  exemptions?: ExemptionRule[];
+  onAddExemption?: (rule: ExemptionRule) => void;
+  focusRules?: FocusRule[];
 }
 
 interface EditableFinding {
@@ -21,7 +24,7 @@ interface EditableFinding {
   isEditing: boolean;
 }
 
-export const ItemAuditModal: React.FC<Props> = ({ item, isOpen, onClose, onUpdate, onAddFindings, language }) => {
+export const ItemAuditModal: React.FC<Props> = ({ item, isOpen, onClose, onUpdate, onAddFindings, language, exemptions = [], onAddExemption, focusRules = [] }) => {
   const [isAuditing, setIsAuditing] = useState(false);
   const [localItem, setLocalItem] = useState<PpapItem>(item);
   const [editableFindings, setEditableFindings] = useState<EditableFinding[]>([]);
@@ -109,6 +112,61 @@ export const ItemAuditModal: React.FC<Props> = ({ item, isOpen, onClose, onUpdat
 
   const updateText = (id: string, newText: string) => {
     setEditableFindings(prev => prev.map(f => f.id === id ? { ...f, text: newText } : f));
+  };
+
+  const handleAudit = async () => {
+    setIsAuditing(true);
+    try {
+      const docName = language === 'zh' && localItem.name_zh ? localItem.name_zh : localItem.name;
+      const docExemptions = exemptions.filter(e => e.documentName === docName).map(e => e.summary);
+      const docFocusRules = focusRules?.filter(e => e.documentName === docName).map(e => e.summary) || [];
+      
+      const res = await auditPpapItem(
+        docName, 
+        localItem.fileData!, 
+        localItem.mimeType!, 
+        language,
+        docExemptions,
+        docFocusRules
+      );
+      setLocalItem({...localItem, status: res.status, feedback: res});
+    } finally {
+      setIsAuditing(false);
+    }
+  };
+
+  const [isExempting, setIsExempting] = useState(false);
+
+  const handleExempt = async () => {
+    const selected = editableFindings.filter(f => f.selected);
+    if (selected.length === 0) return;
+
+    setIsExempting(true);
+    try {
+      const docName = language === 'zh' && localItem.name_zh ? localItem.name_zh : localItem.name;
+      const issues = selected.map(f => f.text);
+      
+      const summary = await summarizeExemptions(docName, issues, language);
+      
+      if (onAddExemption) {
+        onAddExemption({
+          id: `exemption-${Date.now()}`,
+          documentName: docName,
+          summary,
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      // Remove exempted findings from the list
+      setEditableFindings(prev => prev.filter(f => !f.selected));
+      
+      alert(language === 'zh' ? '豁免规则已添加！' : 'Exemption rule added!');
+    } catch (error) {
+      console.error('Error adding exemption:', error);
+      alert(language === 'zh' ? '添加豁免失败' : 'Failed to add exemption');
+    } finally {
+      setIsExempting(false);
+    }
   };
 
   const handleAddToReport = () => {
@@ -219,15 +277,7 @@ export const ItemAuditModal: React.FC<Props> = ({ item, isOpen, onClose, onUpdat
             </div>
             
             <button 
-               onClick={() => { 
-                 setIsAuditing(true); 
-                 auditPpapItem(
-                   language === 'zh' && localItem.name_zh ? localItem.name_zh : localItem.name, 
-                   localItem.fileData!, 
-                   localItem.mimeType!, 
-                   language
-                 ).then(res => setLocalItem({...localItem, status: res.status, feedback: res})).finally(() => setIsAuditing(false)) 
-               }}
+               onClick={handleAudit}
                disabled={!localItem.fileData || isAuditing}
                className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-xl font-bold shadow-lg transition-all flex items-center justify-center gap-2 text-lg transform hover:-translate-y-0.5 active:translate-y-0"
              >
@@ -308,7 +358,15 @@ export const ItemAuditModal: React.FC<Props> = ({ item, isOpen, onClose, onUpdat
                     ))}
                   </div>
 
-                  <div className="p-3 border-t bg-gray-50 flex justify-end">
+                  <div className="p-3 border-t bg-gray-50 flex justify-end gap-2">
+                    <button 
+                      onClick={handleExempt}
+                      disabled={editableFindings.filter(f => f.selected).length === 0 || isExempting}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm rounded-lg font-bold flex items-center gap-2 transition-all shadow-sm"
+                    >
+                      {isExempting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldOff className="w-4 h-4" />}
+                      {language === 'zh' ? '豁免选中项' : 'Exempt Selected'} ({editableFindings.filter(f => f.selected).length})
+                    </button>
                     <button 
                       onClick={handleAddToReport}
                       disabled={editableFindings.filter(f => f.selected).length === 0}
@@ -327,6 +385,21 @@ export const ItemAuditModal: React.FC<Props> = ({ item, isOpen, onClose, onUpdat
                     "{localItem.feedback.recommendation}"
                   </p>
                 </div>
+
+                {/* Active Exemptions */}
+                {exemptions.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 shadow-sm">
+                    <h4 className="font-bold text-amber-900 text-sm mb-2 flex items-center gap-2">
+                      <ShieldOff className="w-4 h-4" />
+                      {language === 'zh' ? '当前生效的豁免规则' : 'Active Exemption Rules'}
+                    </h4>
+                    <ul className="list-disc list-inside text-sm text-amber-800 space-y-1">
+                      {exemptions.map(rule => (
+                        <li key={rule.id}>{rule.summary}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 {/* AI Chat Interface */}
                 <ChatInterface 

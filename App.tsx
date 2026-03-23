@@ -17,7 +17,8 @@ import {
   Loader2,
   LogOut,
   ShieldOff,
-  Target
+  Target,
+  Upload
 } from 'lucide-react';
 import { PpapLevel, PpapItem, AuditStatus, Language, Finding, ConsistencyResult, ProjectInfo, ExemptionRule, FocusRule } from './types';
 import { INITIAL_ITEMS } from './constants';
@@ -28,6 +29,7 @@ import { ReportView } from './components/ReportView';
 import { ExemptionsView } from './components/ExemptionsView';
 import { FocusRulesView } from './components/FocusRulesView';
 import { LandingPage } from './components/LandingPage';
+import { BatchUploadModal } from './components/BatchUploadModal';
 import { PieChart as RePieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
 import { auditPpapItem } from './geminiService';
 import { get, set } from 'idb-keyval';
@@ -123,6 +125,7 @@ function App() {
   const [exemptions, setExemptions] = useState<ExemptionRule[]>([]);
   const [focusRules, setFocusRules] = useState<FocusRule[]>([]);
   const [showWarning, setShowWarning] = useState(true);
+  const [isBatchUploadOpen, setIsBatchUploadOpen] = useState(false);
 
   const t = TRANSLATIONS[language];
 
@@ -438,6 +441,25 @@ function App() {
     { name: t.pendingReview, value: stats.pending },
   ];
 
+  const handleBatchUpload = (uploadedFiles: { item: PpapItem; fileData: string; mimeType: string }[]) => {
+    setItems(currentItems => {
+      const newItems = [...currentItems];
+      uploadedFiles.forEach(upload => {
+        const index = newItems.findIndex(i => i.id === upload.item.id);
+        if (index !== -1) {
+          newItems[index] = {
+            ...newItems[index],
+            fileData: upload.fileData,
+            mimeType: upload.mimeType,
+            status: AuditStatus.PENDING,
+            feedback: undefined
+          };
+        }
+      });
+      return newItems;
+    });
+  };
+
   const getPageTitle = () => {
     switch (activeTab) {
       case 'dashboard': return t.auditOverview;
@@ -726,19 +748,28 @@ function App() {
                     <span className="text-sm font-medium text-gray-600">{t.showing} {items.length} {t.requiredItems} {currentLevel}</span>
                  </div>
                  
-                 {/* Batch Audit Button */}
-                 <button
-                    onClick={handleBatchAudit}
-                    disabled={isBatchProcessing || items.filter(i => i.fileData && i.status === AuditStatus.PENDING).length === 0}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
-                      ${(isBatchProcessing || items.filter(i => i.fileData && i.status === AuditStatus.PENDING).length === 0)
-                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                        : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
-                      }`}
-                 >
-                    {isBatchProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlayCircle className="w-4 h-4" />}
-                    {isBatchProcessing ? t.auditing : t.batchAudit}
-                 </button>
+                 {/* Batch Actions */}
+                 <div className="flex items-center gap-3">
+                   <button
+                      onClick={() => setIsBatchUploadOpen(true)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 shadow-sm"
+                   >
+                      <Upload className="w-4 h-4" />
+                      {language === 'zh' ? '批量上传' : 'Batch Upload'}
+                   </button>
+                   <button
+                      onClick={handleBatchAudit}
+                      disabled={isBatchProcessing || items.filter(i => i.fileData && i.status === AuditStatus.PENDING).length === 0}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                        ${(isBatchProcessing || items.filter(i => i.fileData && i.status === AuditStatus.PENDING).length === 0)
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
+                        }`}
+                   >
+                      {isBatchProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlayCircle className="w-4 h-4" />}
+                      {isBatchProcessing ? t.auditing : t.batchAudit}
+                   </button>
+                 </div>
                </div>
                <div className="divide-y divide-gray-100">
                  {items.map((item) => (
@@ -839,6 +870,15 @@ function App() {
           onAddExemption={(rule) => setExemptions(prev => [...prev, rule])}
         />
       )}
+
+      {/* Batch Upload Modal */}
+      <BatchUploadModal
+        isOpen={isBatchUploadOpen}
+        onClose={() => setIsBatchUploadOpen(false)}
+        items={items}
+        onUpload={handleBatchUpload}
+        language={language}
+      />
     </div>
   );
 }

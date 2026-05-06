@@ -30,6 +30,7 @@ import { ExemptionsView } from './components/ExemptionsView';
 import { FocusRulesView } from './components/FocusRulesView';
 import { LandingPage } from './components/LandingPage';
 import { BatchUploadModal } from './components/BatchUploadModal';
+import { LoginScreen } from './components/LoginScreen';
 import { PieChart as RePieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
 import { auditPpapItem } from './geminiService';
 import { get, set } from 'idb-keyval';
@@ -126,6 +127,7 @@ function App() {
   const [focusRules, setFocusRules] = useState<FocusRule[]>([]);
   const [showWarning, setShowWarning] = useState(true);
   const [isBatchUploadOpen, setIsBatchUploadOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   const t = TRANSLATIONS[language];
 
@@ -133,6 +135,11 @@ function App() {
   useEffect(() => {
     const savedLang = localStorage.getItem('ppap_global_lang');
     if (savedLang) setLanguage(savedLang as Language);
+
+    const authStatus = sessionStorage.getItem('ppap_auth');
+    if (authStatus === 'true') {
+      setIsAuthenticated(true);
+    }
 
     const hasAccepted = sessionStorage.getItem('ppap_warning_accepted');
     if (hasAccepted) {
@@ -500,6 +507,18 @@ function App() {
   ) : null;
 
   if (!isInitialized) return null;
+
+  if (!isAuthenticated) {
+    return (
+      <LoginScreen 
+        language={language}
+        onLogin={() => {
+          sessionStorage.setItem('ppap_auth', 'true');
+          setIsAuthenticated(true);
+        }} 
+      />
+    );
+  }
 
   if (!projectInfo) {
     return (

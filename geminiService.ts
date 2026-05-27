@@ -82,7 +82,7 @@ export const sendChatPrompt = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-flash-lite',
       contents: { parts },
       config: {
         // We want plain text for chat response
@@ -125,7 +125,7 @@ export const summarizeExemptions = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         responseMimeType: "text/plain",
@@ -385,7 +385,7 @@ export const auditPpapItem = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-flash-lite',
       contents: {
         parts: [
           { text: prompt },
@@ -612,7 +612,7 @@ export const runConsistencyCheck = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-flash-lite',
       contents: { parts },
       config: {
         responseMimeType: "application/json",

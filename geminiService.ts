@@ -311,16 +311,18 @@ export const auditPpapItem = async (
          3. **Causal Logic**: Is the Mode -> Effect -> Cause chain logical? Are causes specific?`;
   } else if (isDimensionCheck) {
     specificTaskPrompt = language === 'zh'
-      ? `针对“尺寸检查报告”，请**罗列所有**问题：
-         1. **全尺寸验证**：是否覆盖了图纸上的所有尺寸（全尺寸报告）？遗漏了哪些球标？
-         2. **判定准确性**：实测值是否在公差范围内？
-         3. **超差标识**：超差（OOT）的数值是否已明确标识（如红色/星号）？是否有批准放行的签字？
-         4. **数据真实性专家判断**：数据是否存在异常规律（如所有数据完全是中值，可能造假）？`
-      : `For "Dimension Check Report", list ALL findings:
-         1. Full Layout: Are ALL drawing dims included? Which balloons are missing?
-         2. Accuracy: Are actuals within tolerance?
-         3. OOT Flags: Are Out-of-Tolerance values flagged? Approved?
-         4. Data Integrity: Do data look fake (e.g., all nominal)?`;
+      ? `针对“尺寸检查报告”，请**极其仔细地**罗列所有问题：
+         1. **全尺寸验证**：基于报告内连续的球标编号，检查是否有跳号、漏号？
+         2. **数值及公差解析**：仔细提取表单中的标准值(Nominal)、上限(Upper Limit)、下限(Lower Limit)以及实测值(Actual)。针对正负号（+/-）一定要细致，切勿看反。
+         3. **判定准确性核对**：根据实测值，重新核算其是否严格落在公差范围（[下限, 上限]）内。验证报告内原始的OK/NG判定是否正确。
+         4. **超差标识**：超差（OOT）数值是否已明显标注（加粗/红色等）？是否有相关特许批准？
+         5. **数据真实性风险**：数据是否过度集中在名义值上或者存在不可能出现的完美散布，提示可能存在伪造风险？`
+      : `For "Dimension Check Report", list ALL findings meticulously:
+         1. Full Layout Check: Check for missing or skipped balloon numbers in the sequence.
+         2. Value & tolerance parsing: Extract Nominal, Upper Limit, Lower Limit, and Actual for each item. Pay extreme attention to +/- signs.
+         3. Re-calculation Check: Re-calculate if actuals are TRULY within the [Lower, Upper] limit. Verify if the report's own OK/NG judgment is correct.
+         4. OOT Flags: Are Out-of-Tolerance values explicitly flagged? Approved?
+         5. Data Integrity: Do data look fake (e.g., concentrated exactly on nominal)?`;
   } else if (isMSA) {
     specificTaskPrompt = language === 'zh'
       ? `针对“测量系统分析(MSA)”，请**罗列所有**问题：
@@ -402,6 +404,10 @@ export const auditPpapItem = async (
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            chain_of_thought: {
+              type: Type.STRING,
+              description: "Use this field to write down your step-by-step reasoning, calculations, or dimensional limit checks BEFORE producing the final summary and findings."
+            },
             status: {
               type: Type.STRING,
               enum: ["APPROVED", "REJECTED", "WARNING"],
@@ -487,22 +493,24 @@ export const runConsistencyCheck = async (
   } else if (ruleId === 'dim_vs_drawing') {
     specificRuleInstructions = language === 'zh' ? `
       **关联检查目标：尺寸报告 vs 图纸 (尺寸验证)**
-      **指令：罗列所有未涵盖或超差的尺寸。**
-      1. 识别图纸上的球标编号（Balloon Numbers）或关键尺寸标注。
-      2. 检查尺寸报告中是否包含这些对应的编号或尺寸规格。
-      3. **判定标准**：
-         - 报告是否遗漏了图纸上的尺寸？(列出遗漏的球标号)
-         - 报告中的实测值是否在图纸要求的公差范围内？(列出所有超差项)
-         - 如果有超差（Out of Tolerance），报告中是否已明确标识（如加粗、标红或备注）？
+      **指令：为了确保高准确率，请执行以下详细的提取与计算步骤，并罗列所有未涵盖或超差的尺寸。**
+      1. **系统性提取**：从图纸上逐一识别所有带边框的球标编号（Balloons）和对应的名义尺寸(Nominal)、公差(Tolerance)。**极其关键：识别球标对应的尺寸时，必须严格顺着球标的引线（带箭头的尾巴）找到其指向的具体尺寸，绝不能仅仅根据距离远近来猜测关联尺寸！**
+      2. **数值对比计算**：计算出每项尺寸的绝对上限值(Upper Limit)和绝对下限值(Lower Limit)。
+      3. **实测比对**：在尺寸报告中找到对应球标的实测值，对比实测值是否严格介于下限和上限之间。特别注意正负号（+/-）和单位！
+      4. **判定标准**：
+         - 罗列出所有图纸上存在，但尺寸报告中遗漏的球标。
+         - 列出所有经过你重新计算后确实超差(OOT)的实际测量项。
+         - 若有超差，报告中是否有被特殊标识或被相关人员批准放行？
     ` : `
       **Correlation Goal: Dimension Report vs Drawing**
-      **Instruction: List ALL missing or OOT dimensions.**
-      1. Identify Balloon Numbers/Key Dimensions on the Drawing.
-      2. Check if these IDs/Specs appear in the Dimension Report.
-      3. **Criteria**:
-         - List all missing balloons.
-         - List all OOT (Out-of-Tolerance) values.
-         - Are OOT items clearly flagged?
+      **Instruction: For high accuracy, perform step-by-step extraction and calculation. List ALL missing or OOT dimensions.**
+      1. Systematic Extraction: Identify all Balloon numbers, nominal values, and tolerances on the Drawing. **CRITICAL: When associating a balloon with a dimension, you MUST strictly follow the leader line (the tail with an arrow) pointing from the balloon to the specific dimension, rather than simply picking the physically closest dimension!**
+      2. Calculation: Compute the exact Upper Limit and Lower Limit for each item.
+      3. Measurement Check: Find the corresponding actual value in the Dimension Report. Compare it against the limits. Pay extreme attention to +/- signs and matching units!
+      4. **Criteria**:
+         - List all skipped/missing balloons from the report.
+         - List all values that are genuinely Out-of-Tolerance (OOT) based on your calculation.
+         - Are OOT items clearly flagged or approved?
     `;
   } else if (ruleId === 'sc_traceability') {
     specificRuleInstructions = language === 'zh' ? `
@@ -619,6 +627,10 @@ export const runConsistencyCheck = async (
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            chain_of_thought: {
+              type: Type.STRING,
+              description: "Write down your step-by-step reasoning and calculations here BEFORE determining the status or discrepancies. This greatly improves accuracy."
+            },
             status: { type: Type.STRING, enum: ['PASS', 'FAIL', 'WARNING'] },
             score: { type: Type.INTEGER, description: "Consistency score from 0 to 100" },
             analysis: { 

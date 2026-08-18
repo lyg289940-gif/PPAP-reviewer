@@ -10,6 +10,13 @@ const getAiClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
+const getAiModel = () => {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    return window.localStorage.getItem('ppap_ai_model') || 'gemini-3.5-flash';
+  }
+  return 'gemini-3.5-flash';
+};
+
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
@@ -82,7 +89,7 @@ export const sendChatPrompt = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: getAiModel(),
       contents: { parts },
       config: {
         // We want plain text for chat response
@@ -125,7 +132,7 @@ export const summarizeExemptions = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: getAiModel(),
       contents: prompt,
       config: {
         responseMimeType: "text/plain",
@@ -387,7 +394,7 @@ export const auditPpapItem = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: getAiModel(),
       contents: {
         parts: [
           { text: prompt },
@@ -620,7 +627,7 @@ export const runConsistencyCheck = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: getAiModel(),
       contents: { parts },
       config: {
         responseMimeType: "application/json",

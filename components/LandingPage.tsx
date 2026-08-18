@@ -1,16 +1,18 @@
 
 import React, { useState, useEffect } from 'react';
-import { ProjectInfo, Language } from '../types';
-import { ShieldCheck, ChevronRight, LayoutTemplate, Box, Truck, FileBadge, Plus, History, Trash2, Calendar, FolderOpen } from 'lucide-react';
+import { ProjectInfo, Language, AiModel } from '../types';
+import { ShieldCheck, ChevronRight, LayoutTemplate, Box, Truck, FileBadge, Plus, History, Trash2, Calendar, FolderOpen, Zap, BrainCircuit, Rocket } from 'lucide-react';
 import { del } from 'idb-keyval';
 
 interface Props {
   onStart: (info: ProjectInfo) => void;
   language: Language;
   setLanguage: (lang: Language) => void;
+  aiModel: AiModel;
+  setAiModel: (model: AiModel) => void;
 }
 
-export const LandingPage: React.FC<Props> = ({ onStart, language, setLanguage }) => {
+export const LandingPage: React.FC<Props> = ({ onStart, language, setLanguage, aiModel, setAiModel }) => {
   const [activeTab, setActiveTab] = useState<'new' | 'recent'>('new');
   const [recentProjects, setRecentProjects] = useState<ProjectInfo[]>([]);
   const [formData, setFormData] = useState<Omit<ProjectInfo, 'id' | 'createdAt'>>({
@@ -162,6 +164,46 @@ export const LandingPage: React.FC<Props> = ({ onStart, language, setLanguage })
                   中文
                 </button>
               </div>
+           </div>
+
+           {/* Global AI Model Selector */}
+           <div className="mb-8 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+             <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+                <BrainCircuit className="w-4 h-4 text-blue-600" />
+                {language === 'zh' ? 'AI 推理模型选择' : 'AI Reasoning Model'}
+             </h3>
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <button
+                   onClick={() => setAiModel('gemini-3.5-flash')}
+                   className={`p-3 rounded-lg border text-left transition-all relative overflow-hidden ${aiModel === 'gemini-3.5-flash' ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 hover:border-blue-300'}`}
+                >
+                  <div className="font-bold text-gray-800 text-sm mb-1 flex items-center gap-1"><Zap className="w-4 h-4 text-yellow-500 fill-yellow-500" /> Gemini 3.5 Flash</div>
+                  <div className="text-xs text-gray-500 leading-relaxed">
+                    {language === 'zh' ? '速度与精度的最佳平衡，适合绝大部分常规文件审核。' : 'Best balance of speed and precision for standard audits.'}
+                  </div>
+                  {aiModel === 'gemini-3.5-flash' && <div className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full" />}
+                </button>
+                <button
+                   onClick={() => setAiModel('gemini-3.1-pro-preview')}
+                   className={`p-3 rounded-lg border text-left transition-all relative overflow-hidden ${aiModel === 'gemini-3.1-pro-preview' ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 hover:border-blue-300'}`}
+                >
+                  <div className="font-bold text-gray-800 text-sm mb-1 flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-purple-500" /> Gemini 3.1 Pro</div>
+                  <div className="text-xs text-gray-500 leading-relaxed">
+                    {language === 'zh' ? '最强深度推理能力，适合复杂的全尺寸和图纸测量关联，耗时略长。' : 'Deepest reasoning for complex dimensions and drawings, slightly slower.'}
+                  </div>
+                  {aiModel === 'gemini-3.1-pro-preview' && <div className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full" />}
+                </button>
+                <button
+                   onClick={() => setAiModel('gemini-3.1-flash-lite')}
+                   className={`p-3 rounded-lg border text-left transition-all relative overflow-hidden ${aiModel === 'gemini-3.1-flash-lite' ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 hover:border-blue-300'}`}
+                >
+                  <div className="font-bold text-gray-800 text-sm mb-1 flex items-center gap-1"><Rocket className="w-4 h-4 text-green-500" /> Gemini Flash Lite</div>
+                  <div className="text-xs text-gray-500 leading-relaxed">
+                    {language === 'zh' ? '响应极快且极具性价比，仅适用于简单的文字抽取与核验。' : 'Extremely fast and cost-effective, best for simple text extraction.'}
+                  </div>
+                  {aiModel === 'gemini-3.1-flash-lite' && <div className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full" />}
+                </button>
+             </div>
            </div>
 
            {/* Tab Content */}

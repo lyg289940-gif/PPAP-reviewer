@@ -20,7 +20,7 @@ import {
   Target,
   Upload
 } from 'lucide-react';
-import { PpapLevel, PpapItem, AuditStatus, Language, Finding, ConsistencyResult, ProjectInfo, ExemptionRule, FocusRule } from './types';
+import { PpapLevel, PpapItem, AuditStatus, Language, AiModel, Finding, ConsistencyResult, ProjectInfo, ExemptionRule, FocusRule } from './types';
 import { INITIAL_ITEMS } from './constants';
 import { StatsCard } from './components/StatsCard';
 import { ItemAuditModal } from './components/ItemAuditModal';
@@ -117,6 +117,7 @@ function App() {
   const [selectedItem, setSelectedItem] = useState<PpapItem | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'correlation' | 'report' | 'exemptions' | 'focus'>('dashboard');
   const [language, setLanguage] = useState<Language>('zh'); 
+  const [aiModel, setAiModel] = useState<AiModel>('gemini-3.5-flash');
   const [masterFindings, setMasterFindings] = useState<Finding[]>([]);
   const [consistencyResults, setConsistencyResults] = useState<Record<string, ConsistencyResult>>({});
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
@@ -131,10 +132,13 @@ function App() {
 
   const t = TRANSLATIONS[language];
 
-  // Load Global Settings (Language, Exemptions) and Last Project on Mount
+  // Load Global Settings (Language, AI Model etc.) and Last Project on Mount
   useEffect(() => {
     const savedLang = localStorage.getItem('ppap_global_lang');
     if (savedLang) setLanguage(savedLang as Language);
+
+    const savedModel = localStorage.getItem('ppap_ai_model');
+    if (savedModel) setAiModel(savedModel as AiModel);
 
     const authStatus = sessionStorage.getItem('ppap_auth');
     if (authStatus === 'true') {
@@ -165,6 +169,15 @@ function App() {
       console.error("Failed to save language to localStorage:", e);
     }
   }, [language]);
+
+  // Save AI Model globally
+  useEffect(() => {
+    try {
+      localStorage.setItem('ppap_ai_model', aiModel);
+    } catch (e) {
+      console.error("Failed to save AI model to localStorage:", e);
+    }
+  }, [aiModel]);
 
   // Load Project Specific Data when projectInfo is set
   useEffect(() => {
@@ -524,7 +537,13 @@ function App() {
     return (
       <>
         {WarningModal}
-        <LandingPage onStart={handleStartProject} language={language} setLanguage={setLanguage} />
+        <LandingPage 
+          onStart={handleStartProject} 
+          language={language} 
+          setLanguage={setLanguage} 
+          aiModel={aiModel} 
+          setAiModel={setAiModel} 
+        />
       </>
     );
   }
